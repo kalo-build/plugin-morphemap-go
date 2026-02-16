@@ -1,0 +1,8 @@
+name: StatusToPriority
+aliases:
+  Src: Status
+  Tgt: Priority
+entries:
+  Tgt.Low: Src.Inactive
+  Tgt.Medium: Src.Pending
+  Tgt.High: Src.Active

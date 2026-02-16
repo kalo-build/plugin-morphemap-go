@@ -1,0 +1,54 @@
+name: "@kalo-build/plugin-morphemap-go"
+displayName: "MorpheMap Go Converter"
+description: "Generates type-safe Go converter functions from MorpheMap (.map) definitions. Produces converter functions that transform data between source and target types with proper error handling."
+version: "1.0.0"
+
+inputs:
+  maps:
+    format: "KA:MM1:YAML1"
+    description: "MorpheMap YAML transformation files"
+    suggestedStore:
+      name: "KA_MM_YAML"
+      type: "localFileSystem"
+      path: "./morphe/maps"
+  registry:
+    format: "KA:MO1:YAML1"
+    description: "Local Morphe YAML schema files"
+    suggestedStore:
+      name: "KA_MO_YAML"
+      type: "localFileSystem"
+      path: "./morphe/registry"
+  external:
+    format: "KA:MO1:YAML1"
+    description: "External Morphe YAML schema files (third-party API types)"
+    suggestedStore:
+      name: "KA_MO_EXT"
+      type: "localFileSystem"
+      path: "./morphe/external"
+
+output:
+  format: "KA:MM1:GO1"
+  description: "Go converter function files"
+  suggestedStore:
+    name: "KA_MM_GO"
+    type: "localFileSystem"
+    path: "./internal/generated/converters"
+
+configSchema:
+  packagePath:
+    type: string
+    description: "Go package path for generated converter files"
+    required: true
+  sourcePackagePath:
+    type: string
+    description: "Go package path for source types (imports)"
+    required: true
+  targetPackagePath:
+    type: string
+    description: "Go package path for target types (imports)"
+    required: true
+  errorHandling:
+    type: string
+    description: "Error handling strategy for generated converters"
+    enum: ["return", "collect", "panic"]
+    default: "return"

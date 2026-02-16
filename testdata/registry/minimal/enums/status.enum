@@ -1,0 +1,6 @@
+name: Status
+type: String
+entries:
+  Active: 'active'
+  Inactive: 'inactive'
+  Pending: 'pending'

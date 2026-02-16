@@ -1,0 +1,8 @@
+name: OrgSelfMap
+aliases:
+  Src: Organization
+  Tgt: Organization
+fields:
+  Tgt.ID: Src.ID
+  Tgt.Code: Src.Code
+  Tgt.Name: Src.Name

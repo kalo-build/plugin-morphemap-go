@@ -1,0 +1,6 @@
+name: Priority
+type: String
+entries:
+  Low: 'low'
+  Medium: 'medium'
+  High: 'high'
