@@ -59,23 +59,7 @@ func (v FieldMappingValue) MarshalYAML() (interface{}, error) {
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for FieldMappings.
-// The special case is when "fields" is the literal string "auto" for casing maps.
 func (fm *FieldMappings) UnmarshalYAML(node *yaml.Node) error {
-	// Handle "fields: auto" special case
-	if node.Kind == yaml.ScalarNode {
-		var s string
-		if err := node.Decode(&s); err != nil {
-			return err
-		}
-		if s == "auto" {
-			// Return empty map; the "auto" semantics are handled by the plugin
-			*fm = make(FieldMappings)
-			return nil
-		}
-		return fmt.Errorf("unexpected scalar value for fields: %q (only 'auto' is valid)", s)
-	}
-
-	// Normal case: map of field mappings
 	if node.Kind == yaml.MappingNode {
 		result := make(FieldMappings)
 		for i := 0; i < len(node.Content)-1; i += 2 {
