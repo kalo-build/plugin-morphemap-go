@@ -3,7 +3,7 @@ module github.com/kalo-build/plugin-morphemap-go
 go 1.21.6
 
 require (
-	github.com/kalo-build/morphe-go v0.0.0-20250329083854-5ef43064c884
+	github.com/kalo-build/morphe-go v0.0.0-20260312144523-0841ef1ee9f8
 	github.com/stretchr/testify v1.9.0
 	gopkg.in/yaml.v3 v3.0.1
 )
