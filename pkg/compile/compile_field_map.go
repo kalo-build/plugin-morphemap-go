@@ -13,7 +13,7 @@ import (
 
 // compileFieldMap generates a Go converter function for a field map.
 func compileFieldMap(m *mapdef.MorpheMap, localReg, externalReg *registry.Registry, enumMapIndex map[enumMapKey]*mapdef.MorpheMap, config GoConverterConfig) error {
-	data := BuildFieldMapTemplateData(m, config)
+	data := BuildFieldMapTemplateData(m, localReg, externalReg, config)
 
 	// Generate the converter function
 	content, err := RenderFieldMapTemplate(data)
@@ -56,26 +56,27 @@ type FieldMapTemplateData struct {
 
 // FieldMappingData holds a single field mapping entry for template rendering.
 type FieldMappingData struct {
-	TargetField string
-	SourceExpr  string
-	IsConstant  bool
-	ConstValue  string
-	ConstType   string
-	Cast        string
-	Required    bool
-	ErrorCode   string
-	Condition   string
-	HasValueMap bool
-	ValueMap    map[string]string
+	TargetField    string
+	SourceExpr     string
+	IsConstant     bool
+	ConstValue     string
+	ConstType      string
+	Cast           string
+	Required       bool
+	ErrorCode      string
+	Condition      string
+	HasValueMap    bool
+	ValueMap       map[string]string
+	TargetOptional bool
+	SourceOptional bool
 }
 
 // BuildFieldMapTemplateData constructs template data from a MorpheMap field map.
-func BuildFieldMapTemplateData(m *mapdef.MorpheMap, config GoConverterConfig) FieldMapTemplateData {
+func BuildFieldMapTemplateData(m *mapdef.MorpheMap, localReg, externalReg *registry.Registry, config GoConverterConfig) FieldMapTemplateData {
 	// Determine source/target aliases (heuristic: look at field mapping targets)
 	var sourceAlias, targetAlias string
 	for _, alias := range sortedKeys(m.Aliases) {
 		if targetAlias == "" {
-			// First alias used as a target key prefix is the target
 			for key := range m.Fields {
 				if strings.HasPrefix(key, alias+".") {
 					targetAlias = alias
@@ -91,11 +92,14 @@ func BuildFieldMapTemplateData(m *mapdef.MorpheMap, config GoConverterConfig) Fi
 		}
 	}
 
+	sourceTypeName := m.Aliases[sourceAlias]
+	targetTypeName := m.Aliases[targetAlias]
+
 	data := FieldMapTemplateData{
 		PackageName:       lastPathSegment(config.PackagePath),
 		ConverterName:     m.Name,
-		SourceType:        lastPathSegment(m.Aliases[sourceAlias]),
-		TargetType:        lastPathSegment(m.Aliases[targetAlias]),
+		SourceType:        lastPathSegment(sourceTypeName),
+		TargetType:        lastPathSegment(targetTypeName),
 		SourcePackagePath: config.SourcePackagePath,
 		TargetPackagePath: config.TargetPackagePath,
 		SourcePkgAlias:    lastPathSegment(config.SourcePackagePath),
@@ -104,21 +108,21 @@ func BuildFieldMapTemplateData(m *mapdef.MorpheMap, config GoConverterConfig) Fi
 	}
 
 	for key, val := range m.Fields {
-		// Extract target field name (strip alias prefix)
 		targetField := stripAliasPrefix(key, targetAlias)
 
 		fd := FieldMappingData{
-			TargetField: targetField,
+			TargetField:    targetField,
+			TargetOptional: isFieldOptional(targetTypeName, targetField, localReg, externalReg),
 		}
 
 		if val.IsScalar {
 			switch v := val.Scalar.(type) {
 			case string:
 				if strings.Contains(v, ".") && containsAlias(v, m.Aliases) {
-					// Access path
 					fd.SourceExpr = stripAliasPrefix(v, sourceAlias)
+					sourceField := stripAliasPrefix(v, sourceAlias)
+					fd.SourceOptional = isFieldOptional(sourceTypeName, sourceField, localReg, externalReg)
 				} else {
-					// String constant
 					fd.IsConstant = true
 					fd.ConstValue = fmt.Sprintf("%q", v)
 					fd.ConstType = "string"
@@ -139,6 +143,8 @@ func BuildFieldMapTemplateData(m *mapdef.MorpheMap, config GoConverterConfig) Fi
 		} else if val.Object != nil {
 			obj := val.Object
 			fd.SourceExpr = stripAliasPrefix(obj.From, sourceAlias)
+			sourceField := stripAliasPrefix(obj.From, sourceAlias)
+			fd.SourceOptional = isFieldOptional(sourceTypeName, sourceField, localReg, externalReg)
 			fd.Cast = obj.Cast
 			fd.Required = obj.Required
 			fd.ErrorCode = obj.ErrorCode
@@ -146,12 +152,11 @@ func BuildFieldMapTemplateData(m *mapdef.MorpheMap, config GoConverterConfig) Fi
 			if obj.Cast != "" {
 				data.HasCasts = true
 			}
-			if obj.Required {
+			if obj.Required && fd.SourceOptional {
 				data.HasErrors = true
 			}
 			if len(obj.When) > 0 {
 				data.HasConditionals = true
-				// Build condition expression
 				var conditions []string
 				for condKey, condVal := range obj.When {
 					condField := stripAliasPrefix(condKey, targetAlias)
@@ -168,7 +173,6 @@ func BuildFieldMapTemplateData(m *mapdef.MorpheMap, config GoConverterConfig) Fi
 		data.Fields = append(data.Fields, fd)
 	}
 
-	// Collect hooks
 	if m.Hooks != nil {
 		for _, hook := range m.Hooks.AfterMap {
 			data.Hooks = append(data.Hooks, hook.Name)
@@ -176,6 +180,36 @@ func BuildFieldMapTemplateData(m *mapdef.MorpheMap, config GoConverterConfig) Fi
 	}
 
 	return data
+}
+
+// isFieldOptional checks whether a field on a given Morphe type has the "optional"
+// attribute by looking it up across models, structures, and entities in both registries.
+func isFieldOptional(typeName, fieldName string, localReg, externalReg *registry.Registry) bool {
+	for _, reg := range []*registry.Registry{localReg, externalReg} {
+		if reg == nil {
+			continue
+		}
+		if model, ok := reg.GetAllModels()[typeName]; ok {
+			if f, ok := model.Fields[fieldName]; ok {
+				return hasAttribute(f.Attributes, "optional")
+			}
+		}
+		if structure, ok := reg.GetAllStructures()[typeName]; ok {
+			if f, ok := structure.Fields[fieldName]; ok {
+				return hasAttribute(f.Attributes, "optional")
+			}
+		}
+	}
+	return false
+}
+
+func hasAttribute(attrs []string, target string) bool {
+	for _, a := range attrs {
+		if a == target {
+			return true
+		}
+	}
+	return false
 }
 
 // RenderFieldMapTemplate renders a Go converter file from template data.
@@ -210,22 +244,95 @@ func {{.ConverterName}}(source {{.SourcePkgAlias}}.{{.SourceType}}) ({{.TargetPk
 
 {{- range .Fields}}
 {{- if .IsConstant}}
+{{- if .TargetOptional}}
+	{
+		v := {{.ConstValue}}
+		target.{{.TargetField}} = &v
+	}
+{{- else}}
 	target.{{.TargetField}} = {{.ConstValue}}
+{{- end}}
 {{- else if .Condition}}
 	if {{.Condition}} {
+{{- if and .TargetOptional (not .SourceOptional)}}
+		v := source.{{.SourceExpr}}
+		target.{{.TargetField}} = &v
+{{- else if and (not .TargetOptional) .SourceOptional}}
+		if source.{{.SourceExpr}} != nil {
+			target.{{.TargetField}} = *source.{{.SourceExpr}}
+		}
+{{- else}}
 		target.{{.TargetField}} = source.{{.SourceExpr}}
+{{- end}}
 	}
 {{- else if .Cast}}
+{{- if and .TargetOptional (not .SourceOptional)}}
+	{
+		v := {{.Cast}}(source.{{.SourceExpr}})
+		target.{{.TargetField}} = &v
+	}
+{{- else if and (not .TargetOptional) .SourceOptional}}
+	if source.{{.SourceExpr}} != nil {
+		target.{{.TargetField}} = {{.Cast}}(*source.{{.SourceExpr}})
+	}
+{{- else if and .TargetOptional .SourceOptional}}
+	if source.{{.SourceExpr}} != nil {
+		v := {{.Cast}}(*source.{{.SourceExpr}})
+		target.{{.TargetField}} = &v
+	}
+{{- else}}
 	target.{{.TargetField}} = {{.Cast}}(source.{{.SourceExpr}})
+{{- end}}
 {{- else if .HasValueMap}}
+{{- if .SourceOptional}}
+	if source.{{.SourceExpr}} != nil {
+		switch *source.{{.SourceExpr}} {
+{{- range $src, $tgt := .ValueMap}}
+		case "{{$src}}":
+{{- if $.TargetOptional}}
+			v := "{{$tgt}}"
+			target.{{$.TargetField}} = &v
+{{- else}}
+			target.{{$.TargetField}} = "{{$tgt}}"
+{{- end}}
+{{- end}}
+		}
+	}
+{{- else}}
 	switch source.{{.SourceExpr}} {
 {{- range $src, $tgt := .ValueMap}}
 	case "{{$src}}":
+{{- if $.TargetOptional}}
+		v := "{{$tgt}}"
+		target.{{$.TargetField}} = &v
+{{- else}}
 		target.{{$.TargetField}} = "{{$tgt}}"
 {{- end}}
+{{- end}}
 	}
+{{- end}}
 {{- else if .SourceExpr}}
+{{- if and .Required .SourceOptional}}
+	if source.{{.SourceExpr}} == nil {
+		return target, fmt.Errorf("required field {{.SourceExpr}} is nil")
+	}
+{{- if .TargetOptional}}
 	target.{{.TargetField}} = source.{{.SourceExpr}}
+{{- else}}
+	target.{{.TargetField}} = *source.{{.SourceExpr}}
+{{- end}}
+{{- else if and .TargetOptional (not .SourceOptional)}}
+	{
+		v := source.{{.SourceExpr}}
+		target.{{.TargetField}} = &v
+	}
+{{- else if and (not .TargetOptional) .SourceOptional}}
+	if source.{{.SourceExpr}} != nil {
+		target.{{.TargetField}} = *source.{{.SourceExpr}}
+	}
+{{- else}}
+	target.{{.TargetField}} = source.{{.SourceExpr}}
+{{- end}}
 {{- end}}
 {{- end}}
 
